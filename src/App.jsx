@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import Login from './Login';
 import Dashboard from './Dashboard';
+import ResetPassword from './ResetPassword';
 import { Loader2 } from 'lucide-react';
 
 function App() {
   const [session, setSession] = useState(null);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
+  const [pathname, setPathname] = useState(window.location.pathname);
 
   useEffect(() => {
     // Get the initial active session on component mount
@@ -26,6 +28,23 @@ function App() {
       subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    const handleNavigation = () => {
+      setPathname(window.location.pathname);
+    };
+
+    window.addEventListener('popstate', handleNavigation);
+
+    return () => {
+      window.removeEventListener('popstate', handleNavigation);
+    };
+  }, []);
+
+  const navigateToLogin = () => {
+    window.history.replaceState({}, '', '/');
+    setPathname('/');
+  };
 
   // Display a premium loading spinner while resolving session state
   if (isCheckingSession) {
@@ -48,7 +67,9 @@ function App() {
 
   return (
     <>
-      {!session ? (
+      {pathname === '/reset-password' ? (
+        <ResetPassword onBackToLogin={navigateToLogin} />
+      ) : !session ? (
         <Login />
       ) : (
         <Dashboard user={session.user} />

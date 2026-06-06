@@ -3,6 +3,8 @@ import { supabase } from './supabaseClient';
 import { Mail, Lock, Eye, EyeOff, LogIn, KeyRound, Loader2, AlertCircle, CheckCircle2, UserPlus, User } from 'lucide-react';
 
 export default function Login({ onLoginSuccess }) {
+  const appUrl = (import.meta.env.VITE_APP_URL || window.location.origin).replace(/\/$/, '');
+  const resetPasswordUrl = `${appUrl}/reset-password`;
   const [authMode, setAuthMode] = useState('login'); // 'login', 'register', 'reset'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -72,6 +74,7 @@ export default function Login({ onLoginSuccess }) {
         email,
         password,
         options: {
+          emailRedirectTo: appUrl,
           data: {
             nombre: nombre.trim(),
             apellidos: apellidos.trim(),
@@ -116,7 +119,7 @@ export default function Login({ onLoginSuccess }) {
 
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: window.location.origin,
+        redirectTo: resetPasswordUrl,
       });
 
       if (error) throw error;
