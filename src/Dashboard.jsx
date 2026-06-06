@@ -24,6 +24,7 @@ export default function Dashboard({ user }) {
   const [errorMsg, setErrorMsg] = useState('');
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
   const [lastSavedRecord, setLastSavedRecord] = useState(null);
+  const { officialTime, isSyncingTime, timeSyncError } = useOfficialTime();
 
   // Get user name and last name from metadata, fall back to email prefix
   const displayName = user?.user_metadata?.nombre
@@ -86,7 +87,7 @@ export default function Dashboard({ user }) {
       // 4. Trigger Success Overlay
       setLastSavedRecord({
         tipo: activeTab,
-        hora: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        hora: officialTime.toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         ubicacion: finalLocation
       });
       
@@ -205,7 +206,7 @@ export default function Dashboard({ user }) {
             <Clock className="w-28 h-28" />
           </div>
           
-          <ClockWidget />
+          <ClockWidget time={officialTime} isSyncing={isSyncingTime} />
         </div>
 
         {/* Attendance Register Card */}
@@ -256,6 +257,13 @@ export default function Dashboard({ user }) {
               <div className="p-3 rounded-2xl bg-red-950/40 border border-red-900/50 flex items-start space-x-2 text-red-200 text-sm animate-fadeIn">
                 <AlertTriangle className="w-5 h-5 flex-shrink-0 text-red-400 mt-0.5" />
                 <span>{errorMsg}</span>
+              </div>
+            )}
+
+            {timeSyncError && (
+              <div className="p-3 rounded-2xl bg-amber-950/40 border border-amber-900/50 flex items-start space-x-2 text-amber-100 text-sm animate-fadeIn">
+                <AlertTriangle className="w-5 h-5 flex-shrink-0 text-amber-400 mt-0.5" />
+                <span>{timeSyncError}</span>
               </div>
             )}
 
@@ -402,14 +410,7 @@ export default function Dashboard({ user }) {
 }
 
 // Subcomponent to handle local clock updates
-function ClockWidget() {
-  const [time, setTime] = useState(new Date());
-
-  React.useEffect(() => {
-    const timer = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
+function ClockWidget({ time, isSyncing }) {
   const formattedTime = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   
   const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
@@ -419,7 +420,7 @@ function ClockWidget() {
     <div className="relative z-10 flex flex-col items-center">
       <span className="text-xs font-semibold text-purple-400 uppercase tracking-widest mb-1.5 flex items-center space-x-1">
         <Globe className="w-3 h-3 text-purple-400 animate-spin-slow" />
-        <span>Hora Oficial</span>
+        <span>{isSyncing ? 'Sincronizando hora' : 'Hora Oficial'}</span>
       </span>
       <h2 className="text-4xl font-extrabold text-white tracking-wider select-none tabular-nums">
         {formattedTime}
@@ -429,4 +430,89 @@ function ClockWidget() {
       </p>
     </div>
   );
+}
+
+function useOfficialTime() {
+  const [officialTime, setOfficialTime] = useState(new Date());
+  const [timeSyncError, setTimeSyncError] = useState('');
+  const [isSyncingTime, setIsSyncingTime] = useState(true);
+
+  React.useEffect(() => {
+    let mounted = true;
+    let tickTimer;
+    let refreshTimer;
+    let baseServerMs = Date.now();
+    let basePerfMs = performance.now();
+
+    const applyOfficialTime = (serverMs) => {
+      baseServerMs = serverMs;
+      basePerfMs = performance.now();
+      setOfficialTime(new Date(serverMs));
+
+      if (tickTimer) {
+        clearInterval(tickTimer);
+      }
+
+      tickTimer = window.setInterval(() => {
+        const elapsed = performance.now() - basePerfMs;
+        setOfficialTime(new Date(baseServerMs + elapsed));
+      }, 1000);
+    };
+
+    const syncOfficialTime = async () => {
+      try {
+        const requestStartedAt = performance.now();
+        const { data, error } = await supabase.rpc('get_server_time');
+
+        if (error) {
+          throw error;
+        }
+
+        const roundTripMs = performance.now() - requestStartedAt;
+        const parsedTime = typeof data === 'string' ? data : data?.server_time || data?.now;
+        const serverMs = Date.parse(parsedTime);
+
+        if (Number.isNaN(serverMs)) {
+          throw new Error('La respuesta de Supabase no contiene una hora válida.');
+        }
+
+        if (!mounted) {
+          return;
+        }
+
+        setTimeSyncError('');
+        applyOfficialTime(serverMs + roundTripMs / 2);
+      } catch (error) {
+        if (!mounted) {
+          return;
+        }
+
+        setTimeSyncError('No pudimos sincronizar la hora con Supabase. Verifica tu conexión o la función get_server_time.');
+        applyOfficialTime(Date.now());
+      } finally {
+        if (mounted) {
+          setIsSyncingTime(false);
+        }
+      }
+    };
+
+    syncOfficialTime();
+    refreshTimer = window.setInterval(syncOfficialTime, 5 * 60 * 1000);
+
+    return () => {
+      mounted = false;
+      if (tickTimer) {
+        clearInterval(tickTimer);
+      }
+      if (refreshTimer) {
+        clearInterval(refreshTimer);
+      }
+    };
+  }, []);
+
+  return {
+    officialTime,
+    isSyncingTime,
+    timeSyncError,
+  };
 }
