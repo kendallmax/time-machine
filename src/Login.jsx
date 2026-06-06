@@ -70,14 +70,20 @@ export default function Login({ onLoginSuccess }) {
     setSuccessMsg('');
 
     try {
+      const trimmedNombre = nombre.trim();
+      const trimmedApellidos = apellidos.trim();
+      const displayName = `${trimmedNombre} ${trimmedApellidos}`.trim();
+
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           emailRedirectTo: appUrl,
           data: {
-            nombre: nombre.trim(),
-            apellidos: apellidos.trim(),
+            nombre: trimmedNombre,
+            apellidos: trimmedApellidos,
+            display_name: displayName,
+            full_name: displayName,
           }
         }
       });
