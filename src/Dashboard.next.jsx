@@ -1,13 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { supabase } from './supabaseClient';
-import { 
-  LogOut, 
-  MapPin, 
-  Globe, 
-  Clock, 
-  CheckCircle, 
-  Loader2, 
-  User, 
+import {
+  LogOut,
+  MapPin,
+  Globe,
+  Clock,
+  CheckCircle,
+  Loader2,
+  User,
   Navigation,
   FileText,
   Building,
@@ -15,29 +15,58 @@ import {
   AlertTriangle
 } from 'lucide-react';
 
+const FALLBACK_LOCATIONS = [
+  { id: 1, name: 'Oficina Central', requires_description: false, sort_order: 10 },
+  { id: 2, name: 'Cliente A', requires_description: false, sort_order: 20 },
+  { id: 3, name: 'Sucursal Sur', requires_description: false, sort_order: 30 },
+  { id: 4, name: 'Otro', requires_description: true, sort_order: 40 },
+];
+
 export default function Dashboard({ user }) {
-  const [activeTab, setActiveTab] = useState('entrada'); // 'entrada' or 'salida'
-  const [location, setLocation] = useState('Oficina Central');
+  const [activeTab, setActiveTab] = useState('entrada');
+  const [locations, setLocations] = useState(FALLBACK_LOCATIONS);
+  const [location, setLocation] = useState(FALLBACK_LOCATIONS[0].name);
   const [customDescription, setCustomDescription] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [statusText, setStatusText] = useState(''); // Tracking GPS, IP, Saving...
+  const [statusText, setStatusText] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
   const [lastSavedRecord, setLastSavedRecord] = useState(null);
   const { officialTime, isSyncingTime, timeSyncError } = useOfficialTime();
 
-  // Get user name and last name from metadata, fall back to email prefix
   const displayName = user?.user_metadata?.nombre
     ? `${user.user_metadata.nombre} ${user.user_metadata.apellidos || ''}`.trim()
     : user?.email?.split('@')[0];
 
-  // Predefined locations
-  const locations = [
-    'Oficina Central',
-    'Cliente A',
-    'Sucursal Sur',
-    'Otro'
-  ];
+  useEffect(() => {
+    let mounted = true;
+
+    const loadLocations = async () => {
+      const { data, error } = await supabase.rpc('get_attendance_locations');
+
+      if (!mounted) {
+        return;
+      }
+
+      if (error || !data?.length) {
+        setLocations(FALLBACK_LOCATIONS);
+        setLocation((current) => current || FALLBACK_LOCATIONS[0].name);
+        return;
+      }
+
+      setLocations(data);
+      setLocation((current) => current || data[0].name);
+    };
+
+    loadLocations();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const selectedLocation = locations.find((item) => item.name === location);
+  const requiresLocationDescription = activeTab === 'entrada' && Boolean(selectedLocation?.requires_description);
 
   const handleSignOut = async () => {
     try {
@@ -48,24 +77,20 @@ export default function Dashboard({ user }) {
     }
   };
 
-  // Main logic to register check-in or check-out
   const handleRegisterAttendance = async () => {
     setIsLoading(true);
     setErrorMsg('');
     setStatusText('Obteniendo GPS...');
 
     try {
-      // 1. Get Geolocation coordinates
       const coords = await getGPSCoordinates();
-      
-      // 2. Fetch Public IP
+
       setStatusText('Consultando IP pública...');
       const ipAddress = await getPublicIP();
 
-      // 3. Save to Supabase
       setStatusText('Registrando en base de datos...');
       const finalLocation = activeTab === 'entrada' ? location : 'Salida';
-      const finalDescription = activeTab === 'entrada' && location === 'Otro' ? customDescription : '';
+      const finalDescription = requiresLocationDescription ? customDescription.trim() : '';
 
       const attendanceData = {
         user_id: user.id,
@@ -77,33 +102,29 @@ export default function Dashboard({ user }) {
         ip: ipAddress
       };
 
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('asistencias')
         .insert([attendanceData])
         .select();
 
       if (error) throw error;
 
-      // 4. Trigger Success Overlay
       setLastSavedRecord({
         tipo: activeTab,
         hora: officialTime.toLocaleTimeString('es-CR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         ubicacion: finalLocation
       });
-      
+
       setShowSuccessOverlay(true);
-      
-      // Auto-hide success modal after 3 seconds
+
       setTimeout(() => {
         setShowSuccessOverlay(false);
       }, 3000);
 
-      // Reset fields if check-in
       if (activeTab === 'entrada') {
-        setLocation('Oficina Central');
+        setLocation(locations[0]?.name || FALLBACK_LOCATIONS[0].name);
         setCustomDescription('');
       }
-
     } catch (error) {
       console.error(error);
       setErrorMsg(error.message || 'Ocurrió un error inesperado al registrar.');
@@ -113,7 +134,6 @@ export default function Dashboard({ user }) {
     }
   };
 
-  // Helper promise for Geolocation
   const getGPSCoordinates = () => {
     return new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
@@ -148,7 +168,6 @@ export default function Dashboard({ user }) {
     });
   };
 
-  // Helper function to fetch Public IP
   const getPublicIP = async () => {
     try {
       const response = await fetch('https://api.ipify.org?format=json');
@@ -157,14 +176,12 @@ export default function Dashboard({ user }) {
       return data.ip;
     } catch (e) {
       console.warn('Could not fetch IP from ipify, using fallback.');
-      return '127.0.0.1'; // local fallback if offline or request blocked
+      return '127.0.0.1';
     }
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      
-      {/* Top Navbar */}
       <header className="sticky top-0 z-30 bg-slate-900/80 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <div className="w-9 h-9 bg-gradient-to-tr from-purple-500 to-indigo-500 rounded-xl flex items-center justify-center text-white font-bold shadow-md shadow-purple-500/10">
@@ -186,7 +203,7 @@ export default function Dashboard({ user }) {
             <span className="truncate max-w-[120px]">{displayName}</span>
           </div>
 
-          <button 
+          <button
             onClick={handleSignOut}
             aria-label="Cerrar sesión"
             className="flex items-center space-x-1 bg-red-950/40 hover:bg-red-900/30 text-red-300 border border-red-900/40 rounded-xl p-2 sm:px-3 sm:py-2 text-xs font-semibold transition-all active:scale-95"
@@ -197,22 +214,16 @@ export default function Dashboard({ user }) {
         </div>
       </header>
 
-      {/* Main Container */}
       <main className="flex-1 flex flex-col p-4 max-w-md w-full mx-auto justify-center space-y-6">
-        
-        {/* Date/Time Live Dashboard Widget */}
         <div className="bg-slate-900/50 border border-slate-800/80 rounded-3xl p-5 text-center shadow-lg relative overflow-hidden">
           <div className="absolute -right-6 -bottom-6 text-slate-800/10 pointer-events-none">
             <Clock className="w-28 h-28" />
           </div>
-          
+
           <ClockWidget time={officialTime} isSyncing={isSyncingTime} />
         </div>
 
-        {/* Attendance Register Card */}
         <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-xl overflow-hidden flex flex-col relative">
-          
-          {/* Tabs header */}
           <div className="flex border-b border-slate-800 bg-slate-900/50 p-2">
             <button
               onClick={() => {
@@ -250,9 +261,7 @@ export default function Dashboard({ user }) {
             </button>
           </div>
 
-          {/* Form Content */}
           <div className="p-6 space-y-5">
-            
             {errorMsg && (
               <div className="p-3 rounded-2xl bg-red-950/40 border border-red-900/50 flex items-start space-x-2 text-red-200 text-sm animate-fadeIn">
                 <AlertTriangle className="w-5 h-5 flex-shrink-0 text-red-400 mt-0.5" />
@@ -268,7 +277,6 @@ export default function Dashboard({ user }) {
             )}
 
             {activeTab === 'entrada' ? (
-              // CHECK-IN FLOW
               <div className="space-y-4 animate-fadeIn">
                 <div className="space-y-2">
                   <label htmlFor="location-select" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
@@ -286,8 +294,8 @@ export default function Dashboard({ user }) {
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-11 pr-10 text-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all appearance-none text-base cursor-pointer disabled:opacity-50"
                     >
                       {locations.map((loc) => (
-                        <option key={loc} value={loc}>
-                          {loc}
+                        <option key={loc.id ?? loc.name} value={loc.name}>
+                          {loc.name}
                         </option>
                       ))}
                     </select>
@@ -297,7 +305,7 @@ export default function Dashboard({ user }) {
                   </div>
                 </div>
 
-                {location === 'Otro' && (
+                {requiresLocationDescription && (
                   <div className="space-y-2 animate-slideDown">
                     <label htmlFor="custom-location-description" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
                       Descripción del Lugar
@@ -321,7 +329,6 @@ export default function Dashboard({ user }) {
                 )}
               </div>
             ) : (
-              // CHECK-OUT FLOW
               <div className="text-center py-4 space-y-2 animate-fadeIn">
                 <p className="text-slate-300 text-sm font-medium">
                   ¿Listo para finalizar tu jornada de trabajo?
@@ -332,10 +339,9 @@ export default function Dashboard({ user }) {
               </div>
             )}
 
-            {/* Confirm Action Button */}
             <button
               onClick={handleRegisterAttendance}
-              disabled={isLoading || (activeTab === 'entrada' && location === 'Otro' && !customDescription.trim())}
+              disabled={isLoading || (requiresLocationDescription && !customDescription.trim())}
               className={`w-full py-4 px-6 rounded-2xl font-bold text-white shadow-lg flex items-center justify-center space-x-2 transition-all active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none text-base select-none mt-4 ${
                 activeTab === 'entrada'
                   ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-purple-500/10'
@@ -354,22 +360,18 @@ export default function Dashboard({ user }) {
                 </>
               )}
             </button>
-
           </div>
         </div>
 
-        {/* Instructions Footer Card */}
         <div className="text-center text-slate-500 text-xs space-y-1">
           <p>La aplicación requiere permisos de geolocalización.</p>
           <p>© {new Date().getFullYear()} Time Machine. Todos los derechos reservados.</p>
         </div>
       </main>
 
-      {/* SUCCESS OVERLAY MODAL */}
       {showSuccessOverlay && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-sm text-center shadow-2xl flex flex-col items-center space-y-4 animate-scaleUp">
-            
             <div className="w-16 h-16 bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 rounded-full flex items-center justify-center">
               <CheckCircle2 className="w-10 h-10 animate-bounce" />
             </div>
@@ -404,15 +406,12 @@ export default function Dashboard({ user }) {
           </div>
         </div>
       )}
-
     </div>
   );
 }
 
-// Subcomponent to handle local clock updates
 function ClockWidget({ time, isSyncing }) {
   const formattedTime = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  
   const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
   const formattedDate = time.toLocaleDateString('es-ES', options);
 
@@ -437,7 +436,7 @@ function useOfficialTime() {
   const [timeSyncError, setTimeSyncError] = useState('');
   const [isSyncingTime, setIsSyncingTime] = useState(true);
 
-  React.useEffect(() => {
+  useEffect(() => {
     let mounted = true;
     let tickTimer;
     let refreshTimer;
@@ -501,12 +500,8 @@ function useOfficialTime() {
 
     return () => {
       mounted = false;
-      if (tickTimer) {
-        clearInterval(tickTimer);
-      }
-      if (refreshTimer) {
-        clearInterval(refreshTimer);
-      }
+      if (tickTimer) clearInterval(tickTimer);
+      if (refreshTimer) clearInterval(refreshTimer);
     };
   }, []);
 
