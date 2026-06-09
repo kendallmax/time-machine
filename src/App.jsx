@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import Login from './Login';
-import Dashboard from './Dashboard';
+import Dashboard from './DashboardManaged';
 import ResetPassword from './ResetPassword';
 import { Loader2 } from 'lucide-react';
 
