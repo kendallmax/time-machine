@@ -15,17 +15,17 @@ import {
   AlertTriangle
 } from 'lucide-react';
 
-const FALLBACK_LOCATIONS = [
-  { id: 1, name: 'Oficina Central', requires_description: false, sort_order: 10 },
-  { id: 2, name: 'Cliente A', requires_description: false, sort_order: 20 },
-  { id: 3, name: 'Sucursal Sur', requires_description: false, sort_order: 30 },
-  { id: 4, name: 'Otro', requires_description: true, sort_order: 40 },
-];
+const OTHER_LOCATION = {
+  id: 'other-system',
+  name: 'Otro',
+  requires_description: true,
+  sort_order: 9999,
+};
 
 export default function DashboardManaged({ user }) {
   const [activeTab, setActiveTab] = useState('entrada');
-  const [locations, setLocations] = useState(FALLBACK_LOCATIONS);
-  const [location, setLocation] = useState(FALLBACK_LOCATIONS[0].name);
+  const [locations, setLocations] = useState([OTHER_LOCATION]);
+  const [location, setLocation] = useState(OTHER_LOCATION.name);
   const [customDescription, setCustomDescription] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [statusText, setStatusText] = useState('');
@@ -48,14 +48,19 @@ export default function DashboardManaged({ user }) {
         return;
       }
 
-      if (error || !data?.length) {
-        setLocations(FALLBACK_LOCATIONS);
-        setLocation((current) => current || FALLBACK_LOCATIONS[0].name);
+      if (error) {
+        setLocations([OTHER_LOCATION]);
+        setLocation((current) => current || OTHER_LOCATION.name);
         return;
       }
 
-      setLocations(data);
-      setLocation((current) => current || data[0].name);
+      const normalizedLocations = normalizeAttendanceLocations(data || []);
+      setLocations(normalizedLocations);
+      setLocation((current) =>
+        normalizedLocations.some((item) => item.name === current)
+          ? current
+          : normalizedLocations[0]?.name || OTHER_LOCATION.name
+      );
     };
 
     loadLocations();
@@ -116,7 +121,7 @@ export default function DashboardManaged({ user }) {
       setTimeout(() => setShowSuccessOverlay(false), 3000);
 
       if (activeTab === 'entrada') {
-        setLocation(locations[0]?.name || FALLBACK_LOCATIONS[0].name);
+        setLocation(locations[0]?.name || OTHER_LOCATION.name);
         setCustomDescription('');
       }
     } catch (error) {
@@ -280,6 +285,14 @@ export default function DashboardManaged({ user }) {
       )}
     </div>
   );
+}
+
+function normalizeAttendanceLocations(rawLocations) {
+  const cleanedLocations = rawLocations
+    .filter((location) => location?.name && location.name !== OTHER_LOCATION.name)
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name));
+
+  return [...cleanedLocations, OTHER_LOCATION];
 }
 
 function ClockWidget({ time, isSyncing }) {
